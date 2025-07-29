@@ -9,8 +9,10 @@
 # PACKAGE SETUP AND DEPENDENCIES
 # =============================================================================
 
-# Install and load required packages
-required_packages <- c("box", "dplyr", "lubridate", "ggplot2", "duckdb")
+cat("=== MODULAR INSURANCE ANALYTICS SETUP ===\n")
+
+# Install required packages (but handle box specially)
+required_packages <- c("dplyr", "lubridate", "ggplot2", "duckdb")
 
 for (pkg in required_packages) {
   if (!require(pkg, character.only = TRUE, quietly = TRUE)) {
@@ -20,14 +22,19 @@ for (pkg in required_packages) {
   }
 }
 
-# Box module setup
-suppressMessages({
-  box::use(
-    dplyr[...],
-    lubridate[...],
-    stats[...]
-  )
-})
+# Handle box package specially - it should NOT be loaded with library()
+if (!requireNamespace("box", quietly = TRUE)) {
+  cat("Installing box package...\n")
+  install.packages("box")
+}
+
+# Use box::use() instead of library(box)
+# Box module setup - import functions we need
+box::use(
+  dplyr[...],
+  lubridate[...],
+  stats[...]
+)
 
 cat("✓ Modular Insurance Analytics loaded with {box}\n")
 
