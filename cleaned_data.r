@@ -698,3 +698,411 @@ cat("\n🎯 OVERALL PIPELINE RESULTS:\n")
 cat("  - Total original rows:", total_original_rows, "\n")
 cat("  - Total cleaned rows:", total_final_rows, "\n")
 cat("  - Overall retention:", round(100 * total_final_rows / total_original_rows, 1), "%\n")
+
+# DuckDB Package installieren falls nicht vorhanden
+if (!require("duckdb", character.only = TRUE, quietly = TRUE)) {
+  cat("Installing DuckDB package...\n")
+  install.packages("duckdb")
+  library(duckdb)
+}
+
+cat("✓ DuckDB package loaded\n\n")
+
+# =============================================================================
+# DUCKDB VERSIONED STORAGE FUNKTIONEN
+# =============================================================================
+
+create_version_id <- function() {
+  # Erstelle eindeutige Version ID mit Zeitstempel
+  timestamp <- format(Sys.time(), "%Y%m%d_%H%M%S")
+  version_id <- paste0("v", timestamp)
+  return(version_id)
+}
+
+save_to_duckdb_versioned <- function(cleaned_data_list, cleaning_logs_list, 
+                                   db_path = "data/cleaned/insurance_data.duckdb",
+                                   notes = "Data cleaning pipeline run") {
+  
+  cat("SAVING CLEANED DATA TO DUCKDB (VERSIONED)\n")
+  cat("=========================================\n")
+  
+  # Timing für Performance-Tracking
+  start_time <- Sys.time()
+  
+  # Version ID generieren
+  version_id <- create_version_id()
+  cat("📋 Version ID:", version_id, "\n")
+  
+  # Sicherstellen dass Verzeichnis existiert
+  db_dir <- dirname(db_path)
+  if (!dir.exists(db_dir)) {
+    dir.create(db_dir, recursive = TRUE)
+    cat("✓ Created database directory:", db_dir, "\n")
+  }
+  
+  # DuckDB Verbindung öffnen
+  tryCatch({
+    con <- dbConnect(duckdb::duckdb(), dbdir = db_path)
+    
+    # Versions-Metadaten Tabelle erstellen falls nicht existiert
+    dbExecute(con, "
+      CREATE TABLE IF NOT EXISTS data_versions (
+        version_id VARCHAR PRIMARY KEY,
+        created_at TIMESTAMP,
+        contracts_table_name VARCHAR,
+        customers_table_name VARCHAR,
+        timeseries_table_name VARCHAR,
+        contracts_rows INTEGER,
+        customers_rows INTEGER,
+        timeseries_rows INTEGER,
+        total_rows INTEGER,
+        cleaning_duration_seconds DOUBLE,
+        created_by VARCHAR,
+        notes TEXT
+      )
+    ")
+    
+    cat("✓ DuckDB database initialized:", db_path, "\n")
+    
+    # Tabellennamen mit Version erstellen
+    table_names <- list()
+    row_counts <- list()
+    
+    # =======================================================================
+    # CONTRACTS TABLE SPEICHERN
+    # =======================================================================
+    
+    if (!is.null(cleaned_data_list$contracts)) {
+      contracts_table_name <- paste0("contracts_", version_id)
+      table_names$contracts <- contracts_table_name
+      
+      # Daten in DuckDB schreiben
+      dbWriteTable(con, contracts_table_name, cleaned_data_list$contracts, 
+                   overwrite = TRUE, row.names = FALSE)
+      
+      row_counts$contracts <- nrow(cleaned_data_list$contracts)
+      
+      cat("✅ Saved contracts table:", contracts_table_name, 
+          "(", row_counts$contracts, "rows )\n")
+      
+      # Index auf Contract ID erstellen für bessere Performance
+      tryCatch({
+        dbExecute(con, paste0("CREATE INDEX IF NOT EXISTS idx_", contracts_table_name, 
+                             "_contractid ON ", contracts_table_name, " (contractid)"))
+      }, error = function(e) {
+        cat("  ⚠️ Could not create index on contracts:", e$message, "\n")
+      })
+    } else {
+      table_names$contracts <- NULL
+      row_counts$contracts <- 0
+    }
+    
+    # =======================================================================
+    # CUSTOMERS TABLE SPEICHERN
+    # =======================================================================
+    
+    if (!is.null(cleaned_data_list$customers)) {
+      customers_table_name <- paste0("customers_", version_id)
+      table_names$customers <- customers_table_name
+      
+      # Daten in DuckDB schreiben
+      dbWriteTable(con, customers_table_name, cleaned_data_list$customers, 
+                   overwrite = TRUE, row.names = FALSE)
+      
+      row_counts$customers <- nrow(cleaned_data_list$customers)
+      
+      cat("✅ Saved customers table:", customers_table_name, 
+          "(", row_counts$customers, "rows )\n")
+      
+      # Index auf Customer ID erstellen
+      tryCatch({
+        dbExecute(con, paste0("CREATE INDEX IF NOT EXISTS idx_", customers_table_name, 
+                             "_customerid ON ", customers_table_name, " (customerid)"))
+      }, error = function(e) {
+        cat("  ⚠️ Could not create index on customers:", e$message, "\n")
+      })
+    } else {
+      table_names$customers <- NULL
+      row_counts$customers <- 0
+    }
+    
+    # =======================================================================
+    # TIMESERIES TABLE SPEICHERN
+    # =======================================================================
+    
+    if (!is.null(cleaned_data_list$timeseries)) {
+      timeseries_table_name <- paste0("timeseries_", version_id)
+      table_names$timeseries <- timeseries_table_name
+      
+      # Daten in DuckDB schreiben
+      dbWriteTable(con, timeseries_table_name, cleaned_data_list$timeseries, 
+                   overwrite = TRUE, row.names = FALSE)
+      
+      row_counts$timeseries <- nrow(cleaned_data_list$timeseries)
+      
+      cat("✅ Saved timeseries table:", timeseries_table_name, 
+          "(", row_counts$timeseries, "rows )\n")
+      
+      # Composite Index für bessere Timeseries-Performance
+      tryCatch({
+        dbExecute(con, paste0("CREATE INDEX IF NOT EXISTS idx_", timeseries_table_name, 
+                             "_contract_date ON ", timeseries_table_name, " (contractid, date)"))
+      }, error = function(e) {
+        cat("  ⚠️ Could not create index on timeseries:", e$message, "\n")
+      })
+    } else {
+      table_names$timeseries <- NULL
+      row_counts$timeseries <- 0
+    }
+    
+    # =======================================================================
+    # CLEANING LOGS ALS JSON SPEICHERN
+    # =======================================================================
+    
+    if (!is.null(cleaning_logs_list)) {
+      logs_table_name <- paste0("cleaning_logs_", version_id)
+      
+      # Logs zu DataFrame konvertieren für DuckDB
+      logs_df <- data.frame(
+        version_id = version_id,
+        table_type = names(cleaning_logs_list),
+        log_json = sapply(cleaning_logs_list, function(x) jsonlite::toJSON(x, auto_unbox = TRUE)),
+        stringsAsFactors = FALSE
+      )
+      
+      dbWriteTable(con, logs_table_name, logs_df, 
+                   overwrite = TRUE, row.names = FALSE)
+      
+      cat("✅ Saved cleaning logs:", logs_table_name, "\n")
+    }
+    
+    # =======================================================================
+    # VERSIONS METADATA EINTRAG ERSTELLEN
+    # =======================================================================
+    
+    end_time <- Sys.time()
+    duration_seconds <- as.numeric(difftime(end_time, start_time, units = "secs"))
+    total_rows <- sum(unlist(row_counts))
+    
+    # Metadaten in versions table einfügen
+    version_metadata <- data.frame(
+      version_id = version_id,
+      created_at = format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
+      contracts_table_name = ifelse(is.null(table_names$contracts), NA, table_names$contracts),
+      customers_table_name = ifelse(is.null(table_names$customers), NA, table_names$customers),
+      timeseries_table_name = ifelse(is.null(table_names$timeseries), NA, table_names$timeseries),
+      contracts_rows = row_counts$contracts,
+      customers_rows = row_counts$customers,
+      timeseries_rows = row_counts$timeseries,
+      total_rows = total_rows,
+      cleaning_duration_seconds = round(duration_seconds, 2),
+      created_by = paste0("R_", R.version.string),
+      notes = notes,
+      stringsAsFactors = FALSE
+    )
+    
+    dbWriteTable(con, "data_versions", version_metadata, 
+                 append = TRUE, row.names = FALSE)
+    
+    cat("✅ Saved version metadata\n")
+    
+    # =======================================================================
+    # ERFOLGS-ZUSAMMENFASSUNG
+    # =======================================================================
+    
+    cat("\n🎉 VERSIONED DUCKDB STORAGE COMPLETED!\n")
+    cat("=====================================\n")
+    cat("📋 Version ID:", version_id, "\n")
+    cat("💾 Database:", db_path, "\n")
+    cat("⏱️  Duration:", round(duration_seconds, 2), "seconds\n")
+    cat("📊 Total rows stored:", total_rows, "\n")
+    cat("🗂️  Tables created:\n")
+    for (table_type in names(table_names)) {
+      if (!is.null(table_names[[table_type]])) {
+        cat("   -", table_names[[table_type]], "(", row_counts[[table_type]], "rows )\n")
+      }
+    }
+    
+    # Verbindung schließen
+    dbDisconnect(con)
+    
+    return(list(
+      version_id = version_id,
+      db_path = db_path,
+      table_names = table_names,
+      row_counts = row_counts,
+      duration_seconds = duration_seconds,
+      success = TRUE
+    ))
+    
+  }, error = function(e) {
+    cat("❌ Error saving to DuckDB:", e$message, "\n")
+    if (exists("con")) {
+      dbDisconnect(con)
+    }
+    return(list(success = FALSE, error = e$message))
+  })
+}
+
+# =============================================================================
+# HILFSFUNKTIONEN FÜR VERSION MANAGEMENT
+# =============================================================================
+
+list_duckdb_versions <- function(db_path = "data/cleaned/insurance_data.duckdb") {
+  
+  cat("LISTING DUCKDB VERSIONS\n")
+  cat("=======================\n")
+  
+  if (!file.exists(db_path)) {
+    cat("❌ Database not found:", db_path, "\n")
+    return(NULL)
+  }
+  
+  tryCatch({
+    con <- dbConnect(duckdb::duckdb(), dbdir = db_path)
+    
+    # Alle Versionen abfragen
+    versions <- dbGetQuery(con, "
+      SELECT 
+        version_id,
+        created_at,
+        contracts_rows,
+        customers_rows, 
+        timeseries_rows,
+        total_rows,
+        cleaning_duration_seconds,
+        notes
+      FROM data_versions 
+      ORDER BY created_at DESC
+    ")
+    
+    dbDisconnect(con)
+    
+    if (nrow(versions) == 0) {
+      cat("📋 No versions found in database\n")
+      return(NULL)
+    }
+    
+    cat("📋 Found", nrow(versions), "data versions:\n\n")
+    
+    for (i in 1:nrow(versions)) {
+      v <- versions[i, ]
+      cat("🔖 Version:", v$version_id, "\n")
+      cat("   📅 Created:", v$created_at, "\n")
+      cat("   📊 Rows: Contracts(", v$contracts_rows, "), Customers(", 
+          v$customers_rows, "), Timeseries(", v$timeseries_rows, ")\n")
+      cat("   ⏱️  Duration:", v$cleaning_duration_seconds, "seconds\n")
+      cat("   📝 Notes:", v$notes, "\n\n")
+    }
+    
+    return(versions)
+    
+  }, error = function(e) {
+    cat("❌ Error listing versions:", e$message, "\n")
+    return(NULL)
+  })
+}
+
+load_duckdb_version <- function(version_id, db_path = "data/cleaned/insurance_data.duckdb") {
+  
+  cat("LOADING DUCKDB VERSION\n")
+  cat("======================\n")
+  cat("📋 Loading version:", version_id, "\n")
+  
+  if (!file.exists(db_path)) {
+    cat("❌ Database not found:", db_path, "\n")
+    return(NULL)
+  }
+  
+  tryCatch({
+    con <- dbConnect(duckdb::duckdb(), dbdir = db_path)
+    
+    # Version Metadaten laden
+    version_info <- dbGetQuery(con, paste0("
+      SELECT * FROM data_versions WHERE version_id = '", version_id, "'
+    "))
+    
+    if (nrow(version_info) == 0) {
+      cat("❌ Version not found:", version_id, "\n")
+      dbDisconnect(con)
+      return(NULL)
+    }
+    
+    loaded_data <- list()
+    
+    # Contracts laden
+    if (!is.na(version_info$contracts_table_name)) {
+      contracts <- dbGetQuery(con, paste0("SELECT * FROM ", version_info$contracts_table_name))
+      loaded_data$contracts <- contracts
+      cat("✅ Loaded contracts:", nrow(contracts), "rows\n")
+    }
+    
+    # Customers laden
+    if (!is.na(version_info$customers_table_name)) {
+      customers <- dbGetQuery(con, paste0("SELECT * FROM ", version_info$customers_table_name))
+      loaded_data$customers <- customers
+      cat("✅ Loaded customers:", nrow(customers), "rows\n")
+    }
+    
+    # Timeseries laden
+    if (!is.na(version_info$timeseries_table_name)) {
+      timeseries <- dbGetQuery(con, paste0("SELECT * FROM ", version_info$timeseries_table_name))
+      loaded_data$timeseries <- timeseries 
+      cat("✅ Loaded timeseries:", nrow(timeseries), "rows\n")
+    }
+    
+    dbDisconnect(con)
+    
+    cat("🎉 Version", version_id, "loaded successfully!\n")
+    
+    return(list(
+      version_info = version_info,
+      data = loaded_data
+    ))
+    
+  }, error = function(e) {
+    cat("❌ Error loading version:", e$message, "\n")
+    return(NULL)
+  })
+}
+
+# =============================================================================
+# INTEGRATION MIT IHREM BESTEHENDEN CODE
+# =============================================================================
+
+cat("STEP 5: SAVING TO VERSIONED DUCKDB STORAGE\n")
+cat("===========================================\n")
+
+# Rufen Sie diese Funktion nach Ihrem bestehenden save_cleaned_data() auf
+duckdb_result <- save_to_duckdb_versioned(
+  cleaned_data_list = cleaned_data,
+  cleaning_logs_list = cleaning_logs,
+  notes = "Complete automated cleaning pipeline with DuckDB storage"
+)
+
+# Aktualisierte finale Zusammenfassung  
+cat("🎯 UPDATED OVERALL PIPELINE RESULTS:\n")
+cat("  - Total original rows:", total_original_rows, "\n")
+cat("  - Total cleaned rows:", total_final_rows, "\n")
+cat("  - Overall retention:", round(100 * total_final_rows / total_original_rows, 1), "%\n")
+
+if (duckdb_result$success) {
+  cat("  - DuckDB Version:", duckdb_result$version_id, "\n")
+  cat("  - Database location:", duckdb_result$db_path, "\n")
+  cat("✅ All data successfully cleaned and stored in versioned DuckDB!\n")
+} else {
+  cat("❌ DuckDB storage failed\n")
+}
+
+cat("\n✅ COMPLETE PIPELINE FINISHED!\n")
+cat("📁 CSV files available in: data/cleaned/\n")
+cat("🗄️  DuckDB database available at:", duckdb_result$db_path, "\n")
+cat("📋 Cleaning logs available in: reports/\n")
+
+# Stop logging
+cat("\n=====================================\n")
+cat("Pipeline completed:", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "\n")
+cat("=====================================\n")
+
+sink()
+cat("📄 Complete pipeline log saved to:", log_file, "\n")
