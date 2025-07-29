@@ -232,19 +232,24 @@ clean_data <- function(data, table_type = "unknown", verbose = TRUE) {
   if ("contractid" %in% names(cleaned_data)) {
     if (verbose) cat("Processing Contract IDs...\n")
     
-    original_contractids <- cleaned_data$contractid
+    original_contractids <- as.character(cleaned_data$contractid)
+    
+    # Remove NA values for pattern matching
+    non_na_original <- original_contractids[!is.na(original_contractids)]
     
     # Clean contract IDs - remove invalid characters and standardize format
-    cleaned_contractids <- gsub("[^V0-9]", "", as.character(original_contractids))
+    cleaned_contractids <- gsub("[^V0-9]", "", original_contractids)
     
     # Fix common formatting issues
     cleaned_contractids <- gsub("^V0*", "V", cleaned_contractids)  # Remove leading zeros after V
     cleaned_contractids <- ifelse(nchar(cleaned_contractids) < 2, NA, cleaned_contractids)
     
     # Count changes
-    invalid_before <- sum(!grepl("^V[0-9]+$", original_contractids, na.rm = TRUE))
+    invalid_before <- sum(!grepl("^V[0-9]+$", non_na_original))
+    non_na_cleaned <- cleaned_contractids[!is.na(cleaned_contractids)]
+    invalid_after <- sum(!grepl("^V[0-9]+$", non_na_cleaned))
+    
     cleaned_data$contractid <- cleaned_contractids
-    invalid_after <- sum(!grepl("^V[0-9]+$", cleaned_contractids, na.rm = TRUE))
     
     if (verbose) {
       cat("  ✓ Contract IDs: Fixed", invalid_before - invalid_after, "formatting issues\n")
@@ -259,16 +264,21 @@ clean_data <- function(data, table_type = "unknown", verbose = TRUE) {
   if ("customerid" %in% names(cleaned_data)) {
     if (verbose) cat("Processing Customer IDs...\n")
     
-    original_customerids <- cleaned_data$customerid
+    original_customerids <- as.character(cleaned_data$customerid)
+    
+    # Remove NA values for pattern matching
+    non_na_original <- original_customerids[!is.na(original_customerids)]
     
     # Clean customer IDs
-    cleaned_customerids <- gsub("[^K0-9]", "", as.character(original_customerids))
+    cleaned_customerids <- gsub("[^K0-9]", "", original_customerids)
     cleaned_customerids <- gsub("^K0*", "K", cleaned_customerids)
     cleaned_customerids <- ifelse(nchar(cleaned_customerids) < 2, NA, cleaned_customerids)
     
-    invalid_before <- sum(!grepl("^K[0-9]+$", original_customerids, na.rm = TRUE))
+    invalid_before <- sum(!grepl("^K[0-9]+$", non_na_original))
+    non_na_cleaned <- cleaned_customerids[!is.na(cleaned_customerids)]
+    invalid_after <- sum(!grepl("^K[0-9]+$", non_na_cleaned))
+    
     cleaned_data$customerid <- cleaned_customerids
-    invalid_after <- sum(!grepl("^K[0-9]+$", cleaned_customerids, na.rm = TRUE))
     
     if (verbose) {
       cat("  ✓ Customer IDs: Fixed", invalid_before - invalid_after, "formatting issues\n")
@@ -283,19 +293,23 @@ clean_data <- function(data, table_type = "unknown", verbose = TRUE) {
   if ("mandantid" %in% names(cleaned_data)) {
     if (verbose) cat("Processing Mandant IDs...\n")
     
-    original_mandantids <- cleaned_data$mandantid
+    original_mandantids <- as.character(cleaned_data$mandantid)
     
     # Clean mandant IDs - keep only LV1 or LV2
-    cleaned_mandantids <- toupper(gsub("[^LV12]", "", as.character(original_mandantids)))
+    cleaned_mandantids <- toupper(gsub("[^LV12]", "", original_mandantids))
     
     # Fix common issues
     cleaned_mandantids <- ifelse(grepl("LV.*1", cleaned_mandantids), "LV1", cleaned_mandantids)
     cleaned_mandantids <- ifelse(grepl("LV.*2", cleaned_mandantids), "LV2", cleaned_mandantids)
     cleaned_mandantids <- ifelse(cleaned_mandantids %in% c("LV1", "LV2"), cleaned_mandantids, NA)
     
-    invalid_before <- sum(!original_mandantids %in% c("LV1", "LV2"), na.rm = TRUE)
+    # Count invalid entries before and after
+    non_na_original <- original_mandantids[!is.na(original_mandantids)]
+    invalid_before <- sum(!non_na_original %in% c("LV1", "LV2"))
+    non_na_cleaned <- cleaned_mandantids[!is.na(cleaned_mandantids)]
+    invalid_after <- sum(!non_na_cleaned %in% c("LV1", "LV2"))
+    
     cleaned_data$mandantid <- cleaned_mandantids
-    invalid_after <- sum(!cleaned_mandantids %in% c("LV1", "LV2"), na.rm = TRUE)
     
     if (verbose) {
       cat("  ✓ Mandant IDs: Fixed", invalid_before - invalid_after, "formatting issues\n")
@@ -467,9 +481,11 @@ clean_data <- function(data, table_type = "unknown", verbose = TRUE) {
     }
     
     # Keep rows with missing birth dates (not always critical)
-    missing_birthdate <- sum(is.na(cleaned_data$birthdate))
-    if (missing_birthdate > 0 && verbose) {
-      cat("  ⚠️ KEPT", missing_birthdate, "rows with missing birth dates (may be legitimate)\n")
+    if ("birthdate" %in% names(cleaned_data)) {
+      missing_birthdate <- sum(is.na(cleaned_data$birthdate))
+      if (missing_birthdate > 0 && verbose) {
+        cat("  ⚠️ KEPT", missing_birthdate, "rows with missing birth dates (may be legitimate)\n")
+      }
     }
     
   } else if (table_type == "timeseries") {
@@ -487,9 +503,11 @@ clean_data <- function(data, table_type = "unknown", verbose = TRUE) {
     }
     
     # Keep rows with missing surrender values but flag them
-    missing_values <- sum(is.na(cleaned_data$surrender_value))
-    if (missing_values > 0 && verbose) {
-      cat("  ⚠️ KEPT", missing_values, "rows with missing surrender values (may indicate data gaps)\n")
+    if ("surrender_value" %in% names(cleaned_data)) {
+      missing_values <- sum(is.na(cleaned_data$surrender_value))
+      if (missing_values > 0 && verbose) {
+        cat("  ⚠️ KEPT", missing_values, "rows with missing surrender values (may indicate data gaps)\n")
+      }
     }
   }
   
@@ -680,14 +698,3 @@ cat("\n🎯 OVERALL PIPELINE RESULTS:\n")
 cat("  - Total original rows:", total_original_rows, "\n")
 cat("  - Total cleaned rows:", total_final_rows, "\n")
 cat("  - Overall retention:", round(100 * total_final_rows / total_original_rows, 1), "%\n")
-
-cat("\n✅ DATA CLEANING PIPELINE COMPLETED SUCCESSFULLY!\n")
-cat("📁 Cleaned data available in: data/cleaned/\n")
-cat("📋 Cleaning logs available in: reports/\n")
-
-# Stop logging
-cat("\n=====================================\n")
-cat("Pipeline completed:", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "\n")
-cat("=====================================\n")
-
-sink()
