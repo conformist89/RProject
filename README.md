@@ -84,7 +84,6 @@ Dieses Projekt beinhaltet eine automatisierte Datenverarbeitung und -bereinigung
 
 ---
 
-   ```
 
 ## 📁 Projektstruktur (Beispiel)
 
