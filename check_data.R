@@ -20,6 +20,9 @@ tryCatch({
   stop()
 })
 
+log_file <- paste0("reports/primary_data_quality_log_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".txt")
+sink(log_file, append = TRUE, split = TRUE)
+
 # CHECK FILE 1: contracts.sqlite
 cat("1. CHECKING contracts.sqlite\n")
 cat("============================\n")
@@ -266,3 +269,5 @@ if (files_found == 3) {
 cat("\nData check completed:", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "\n")
 cat("=== END OF DATA CHECK ===\n")
 
+sink()
+cat("📄 Complete assessment log saved to:", log_file, "\n")
