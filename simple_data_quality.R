@@ -27,6 +27,9 @@ if (!dir.exists("reports")) {
   cat("✓ Created reports directory\n")
 }
 
+log_file <- paste0("reports/data_quality_log_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".txt")
+sink(log_file, append = TRUE, split = TRUE)
+
 # LOAD DATA
 cat("LOADING DATA FOR QUALITY CHECKS\n")
 cat("================================\n")
@@ -559,3 +562,7 @@ write.csv(summary_data, "reports/quality_assessment_summary.csv", row.names = FA
 cat("\n📊 Summary saved to: reports/quality_assessment_summary.csv\n")
 cat("📅 Assessment completed:", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "\n")
 cat("==================================================\n")
+
+# Stop logging
+sink()
+cat("📄 Complete assessment log saved to:", log_file, "\n")
