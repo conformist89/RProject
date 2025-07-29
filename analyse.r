@@ -1,8 +1,8 @@
 # =============================================================================
-# VOLLSTÄNDIGE DEMO DER MODULAR ANALYTICS FUNCTIONS
+# KORRIGIERTE DEMO DER MODULAR ANALYTICS FUNCTIONS - DATE COLUMN FIX
 # =============================================================================
-# Purpose: Demonstration aller entwickelten Analytics-Module
-# File: demo_analytics.R
+# Purpose: Demonstration aller entwickelten Analytics-Module (mit Date-Fix)
+# File: fixed_demo_analytics.R
 
 # =============================================================================
 # VORAUSSETZUNGEN
@@ -22,8 +22,7 @@ tryCatch({
   library(duckdb)
   con <- dbConnect(duckdb::duckdb(), "data/cleaned/insurance_data.duckdb")
   
-  # Laden Sie die neueste Version (ersetzen Sie VERSION_ID mit Ihrer aktuellen Version)
-  # Sie können list_duckdb_versions() verwenden um verfügbare Versionen zu sehen
+  # Laden Sie die neueste Version
   versions <- dbGetQuery(con, "SELECT version_id FROM data_versions ORDER BY created_at DESC LIMIT 1")
   latest_version <- versions$version_id[1]
   
@@ -36,10 +35,20 @@ tryCatch({
   
   dbDisconnect(con)
   
+  # WICHTIGER FIX: Konvertiere Date-Spalten explizit
+  customers_clean$birthdate <- as.Date(customers_clean$birthdate)
+  timeseries_clean$date <- as.Date(timeseries_clean$date)
+  
   cat("✅ Loaded from DuckDB:\n")
   cat("   - Contracts:", nrow(contracts_clean), "rows\n")
   cat("   - Customers:", nrow(customers_clean), "rows\n")
-  cat("   - Timeseries:", nrow(timeseries_clean), "rows\n\n")
+  cat("   - Timeseries:", nrow(timeseries_clean), "rows\n")
+  
+  # DEBUG: Check data types
+  cat("📋 DATA TYPES CHECK:\n")
+  cat("   - Customers birthdate:", class(customers_clean$birthdate), "\n")
+  cat("   - Timeseries date:", class(timeseries_clean$date), "\n")
+  cat("   - Timeseries date sample:", head(timeseries_clean$date, 3), "\n\n")
   
 }, error = function(e) {
   cat("⚠️ DuckDB loading failed, trying CSV fallback...\n")
@@ -95,39 +104,100 @@ customers_custom_age <- age_classification$classify_age_groups(
 cat("\n")
 
 # =============================================================================
-# DEMO 2: ZEITREIHEN ANALYSE
+# DEMO 2: ZEITREIHEN ANALYSE (FIXED VERSION)
 # =============================================================================
 
 cat("DEMO 2: ZEITREIHEN ANALYSE\n")
 cat("===========================\n")
 
+# DEBUG: Prüfe Timeseries-Daten vor der Analyse
+cat("🔍 DEBUGGING TIMESERIES DATA:\n")
+cat("   Columns:", paste(names(timeseries_clean), collapse = ", "), "\n")
+cat("   Date column class:", class(timeseries_clean$date), "\n")
+cat("   Date sample:", paste(head(timeseries_clean$date, 3), collapse = ", "), "\n")
+cat("   Surrender value sample:", paste(head(timeseries_clean$surrender_value, 3), collapse = ", "), "\n")
+
+# Zusätzliche Datenbereinigung für die Zeitreihen-Analyse
+timeseries_for_analysis <- timeseries_clean %>%
+  filter(
+    !is.na(contractid), 
+    !is.na(date), 
+    !is.na(surrender_value),
+    contractid != "",
+    surrender_value > 0  # Nur positive Werte
+  ) %>%
+  arrange(contractid, date)
+
+cat("   Cleaned timeseries rows:", nrow(timeseries_for_analysis), "\n")
+cat("   Unique contracts:", length(unique(timeseries_for_analysis$contractid)), "\n\n")
+
 # Schritt 1: Monatliche Wachstumsraten berechnen
-growth_rates <- timeseries_analysis$calculate_monthly_growth(
-  timeseries_data = timeseries_clean,
-  min_observations = 3
-)
-
-cat("📈 ERSTE 5 WACHSTUMSRATEN:\n")
-print(head(growth_rates[c("contractid", "date", "surrender_value", "monthly_growth_rate")], 5))
-
-# Schritt 2: Volatilität pro Vertrag berechnen
-volatility_stats <- timeseries_analysis$calculate_volatility(
-  growth_data = growth_rates,
-  min_periods = 6
-)
-
-cat("\n📊 TOP 5 VOLATILSTE VERTRÄGE:\n")
-print(head(volatility_stats[c("contractid", "volatility", "volatility_class", "risk_adjusted_return")], 5))
-
-# Schritt 3: Zinssensitivität berechnen
-interest_sensitivity <- timeseries_analysis$calculate_interest_sensitivity(
-  timeseries_data = timeseries_clean,
-  interest_rate_data = NULL,  # Verwendet synthetische Daten
-  min_observations = 12
-)
-
-cat("\n💰 TOP 5 ZINSSENSITIVE VERTRÄGE:\n")
-print(head(interest_sensitivity[c("contractid", "correlation", "sensitivity_class", "r_squared")], 5))
+tryCatch({
+  growth_rates <- timeseries_analysis$calculate_monthly_growth(
+    timeseries_data = timeseries_for_analysis,
+    min_observations = 3
+  )
+  
+  if (nrow(growth_rates) > 0) {
+    cat("📈 ERSTE 5 WACHSTUMSRATEN:\n")
+    growth_sample <- growth_rates %>%
+      select(contractid, date, surrender_value, monthly_growth_rate) %>%
+      head(5)
+    print(growth_sample)
+    
+    # Schritt 2: Volatilität pro Vertrag berechnen
+    volatility_stats <- timeseries_analysis$calculate_volatility(
+      growth_data = growth_rates,
+      min_periods = 6
+    )
+    
+    if (nrow(volatility_stats) > 0) {
+      cat("\n📊 TOP 5 VOLATILSTE VERTRÄGE:\n")
+      volatility_sample <- volatility_stats %>%
+        select(contractid, volatility, volatility_class, risk_adjusted_return) %>%
+        head(5)
+      print(volatility_sample)
+    } else {
+      cat("⚠️ Keine Volatilitätsdaten verfügbar (nicht genügend Perioden)\n")
+      volatility_stats <- data.frame()  # Leerer DataFrame
+    }
+    
+    # Schritt 3: Zinssensitivität berechnen
+    interest_sensitivity <- timeseries_analysis$calculate_interest_sensitivity(
+      timeseries_data = timeseries_for_analysis,
+      interest_rate_data = NULL,  # Verwendet synthetische Daten
+      min_observations = 12
+    )
+    
+    if (nrow(interest_sensitivity) > 0) {
+      cat("\n💰 TOP 5 ZINSSENSITIVE VERTRÄGE:\n")
+      sensitivity_sample <- interest_sensitivity %>%
+        select(contractid, correlation, sensitivity_class, r_squared) %>%
+        head(5)
+      print(sensitivity_sample)
+    } else {
+      cat("⚠️ Keine Zinssensitivitätsdaten verfügbar (nicht genügend Beobachtungen)\n")
+      interest_sensitivity <- data.frame()  # Leerer DataFrame
+    }
+    
+  } else {
+    cat("❌ Keine Wachstumsraten berechnet - prüfen Sie die Datenqualität\n")
+    growth_rates <- data.frame()
+    volatility_stats <- data.frame()
+    interest_sensitivity <- data.frame()
+  }
+  
+}, error = function(e) {
+  cat("❌ Zeitreihen-Analyse Fehler:", e$message, "\n")
+  cat("🔍 Debug Info:\n")
+  cat("   - Timeseries rows:", nrow(timeseries_for_analysis), "\n")
+  cat("   - Date range:", min(timeseries_for_analysis$date), "to", max(timeseries_for_analysis$date), "\n")
+  
+  # Erstelle leere DataFrames als Fallback
+  growth_rates <- data.frame()
+  volatility_stats <- data.frame()
+  interest_sensitivity <- data.frame()
+})
 
 cat("\n")
 
@@ -142,8 +212,8 @@ cat("============================\n")
 mandant_summaries <- mandant_analysis$create_mandant_summaries(
   contracts_data = contracts_clean,
   customers_data = customers_with_age,  # Mit Altersgruppen
-  timeseries_data = timeseries_clean,
-  volatility_data = volatility_stats
+  timeseries_data = timeseries_for_analysis,  # Verwende gereinigte Daten
+  volatility_data = if(nrow(volatility_stats) > 0) volatility_stats else NULL
 )
 
 # Zeige die verschiedenen Analysen
@@ -179,20 +249,30 @@ age_mandant_cross <- enhanced_contracts %>%
 cat("📊 ALTERSGRUPPEN x MANDANTEN KREUZTABELLE:\n")
 print(age_mandant_cross)
 
-# Durchschnittliche Volatilität je Altersgruppe und Mandant
+# Durchschnittliche Volatilität je Altersgruppe und Mandant (nur wenn Daten verfügbar)
 if (nrow(volatility_stats) > 0) {
-  volatility_enhanced <- volatility_stats %>%
-    inner_join(enhanced_contracts[c("contractid", "mandantid", "age_group")], by = "contractid") %>%
-    group_by(mandantid, age_group) %>%
-    summarise(
-      contracts = n(),
-      mean_volatility = round(mean(volatility, na.rm = TRUE), 3),
-      .groups = 'drop'
-    ) %>%
-    filter(contracts >= 3)  # Nur Gruppen mit mindestens 3 Verträgen
-  
-  cat("\n📈 DURCHSCHNITTLICHE VOLATILITÄT JE MANDANT & ALTERSGRUPPE:\n")
-  print(volatility_enhanced)
+  tryCatch({
+    volatility_enhanced <- volatility_stats %>%
+      inner_join(enhanced_contracts[c("contractid", "mandantid", "age_group")], by = "contractid") %>%
+      group_by(mandantid, age_group) %>%
+      summarise(
+        contracts = n(),
+        mean_volatility = round(mean(volatility, na.rm = TRUE), 3),
+        .groups = 'drop'
+      ) %>%
+      filter(contracts >= 2)  # Reduziert auf mindestens 2 Verträge
+    
+    if (nrow(volatility_enhanced) > 0) {
+      cat("\n📈 DURCHSCHNITTLICHE VOLATILITÄT JE MANDANT & ALTERSGRUPPE:\n")
+      print(volatility_enhanced)
+    } else {
+      cat("\n⚠️ Nicht genügend Volatilitätsdaten für Altersgruppen-Analyse\n")
+    }
+  }, error = function(e) {
+    cat("\n⚠️ Volatilitäts-Altersgruppen-Analyse nicht möglich:", e$message, "\n")
+  })
+} else {
+  cat("\n⚠️ Keine Volatilitätsdaten für erweiterte Analyse verfügbar\n")
 }
 
 # =============================================================================
@@ -209,34 +289,47 @@ if (!dir.exists("reports/analytics")) {
 
 timestamp <- format(Sys.time(), "%Y%m%d_%H%M%S")
 
-# Export verschiedener Analysen als CSV
+# Export verschiedener Analysen als CSV (nur wenn Daten vorhanden)
 tryCatch({
-  # Altersgruppen Summary
+  # Altersgruppen Summary (immer verfügbar)
   write.csv(age_summary, 
            paste0("reports/analytics/age_summary_", timestamp, ".csv"), 
            row.names = FALSE)
+  cat("✅ Exported: age_summary\n")
   
-  # Volatilitäts-Statistiken
-  write.csv(volatility_stats, 
-           paste0("reports/analytics/volatility_stats_", timestamp, ".csv"), 
-           row.names = FALSE)
+  # Volatilitäts-Statistiken (nur wenn verfügbar)
+  if (nrow(volatility_stats) > 0) {
+    write.csv(volatility_stats, 
+             paste0("reports/analytics/volatility_stats_", timestamp, ".csv"), 
+             row.names = FALSE)
+    cat("✅ Exported: volatility_stats\n")
+  } else {
+    cat("⚠️ Skipped: volatility_stats (no data)\n")
+  }
   
-  # Zinssensitivität
-  write.csv(interest_sensitivity, 
-           paste0("reports/analytics/interest_sensitivity_", timestamp, ".csv"), 
-           row.names = FALSE)
+  # Zinssensitivität (nur wenn verfügbar)
+  if (nrow(interest_sensitivity) > 0) {
+    write.csv(interest_sensitivity, 
+             paste0("reports/analytics/interest_sensitivity_", timestamp, ".csv"), 
+             row.names = FALSE)
+    cat("✅ Exported: interest_sensitivity\n")
+  } else {
+    cat("⚠️ Skipped: interest_sensitivity (no data)\n")
+  }
   
   # Mandanten Analysen (als JSON für komplexe Struktur)
   write(jsonlite::toJSON(mandant_summaries, pretty = TRUE),
         paste0("reports/analytics/mandant_summaries_", timestamp, ".json"))
+  cat("✅ Exported: mandant_summaries\n")
   
   # Kombinierte Analyse
   write.csv(age_mandant_cross, 
            paste0("reports/analytics/age_mandant_cross_", timestamp, ".csv"), 
            row.names = FALSE)
+  cat("✅ Exported: age_mandant_cross\n")
   
-  cat("✅ EXPORT ERFOLGREICH:\n")
-  cat("   📁 Alle Analyseergebnisse gespeichert in: reports/analytics/\n")
+  cat("\n✅ EXPORT ERFOLGREICH:\n")
+  cat("   📁 Analyseergebnisse gespeichert in: reports/analytics/\n")
   cat("   🏷️  Timestamp:", timestamp, "\n")
   
 }, error = function(e) {
@@ -274,7 +367,7 @@ if (!is.null(mandant_summaries$distribution)) {
       "(", mandant_leader$percentage[1], "% der Verträge)\n")
 }
 
-# 3. Volatilitäts Insights
+# 3. Volatilitäts Insights (nur wenn verfügbar)
 if (nrow(volatility_stats) > 0) {
   high_vol_contracts <- sum(volatility_stats$volatility_class %in% c("Hoch", "Sehr hoch"))
   total_contracts <- nrow(volatility_stats)
@@ -284,9 +377,12 @@ if (nrow(volatility_stats) > 0) {
       "(", round(100 * high_vol_contracts / total_contracts, 1), "%)\n")
   cat("   - Durchschnittliche Portfolio-Volatilität:", 
       round(mean(volatility_stats$volatility, na.rm = TRUE), 2), "%\n")
+} else {
+  cat("\n📊 RISIKO-PROFIL:\n")
+  cat("   - ⚠️ Volatilitätsanalyse nicht verfügbar (zu wenig historische Daten)\n")
 }
 
-# 4. Zinssensitivitäts Insights
+# 4. Zinssensitivitäts Insights (nur wenn verfügbar)
 if (nrow(interest_sensitivity) > 0) {
   high_sens_contracts <- sum(interest_sensitivity$sensitivity_class %in% c("Hoch", "Sehr hoch"))
   total_sens_contracts <- nrow(interest_sensitivity)
@@ -296,11 +392,21 @@ if (nrow(interest_sensitivity) > 0) {
       "(", round(100 * high_sens_contracts / total_sens_contracts, 1), "%)\n")
   cat("   - Durchschnittliche Korrelation:", 
       round(mean(abs(interest_sensitivity$correlation), na.rm = TRUE), 3), "\n")
+} else {
+  cat("\n💰 ZINSSENSITIVITÄT:\n")
+  cat("   - ⚠️ Zinssensitivitätsanalyse nicht verfügbar (zu wenig historische Daten)\n")
 }
+
+# 5. Datenqualitäts-Hinweise
+cat("\n📋 DATENQUALITÄT:\n")
+cat("   - Verträge mit Zeitreihendaten:", length(unique(timeseries_for_analysis$contractid)), "von", nrow(contracts_clean), "\n")
+cat("   - Kunden mit Altersangaben:", nrow(customers_with_age), "von", nrow(customers_clean), "\n")
+cat("   - Durchschnittliche Beobachtungen pro Vertrag:", 
+    round(nrow(timeseries_for_analysis) / length(unique(timeseries_for_analysis$contractid)), 1), "\n")
 
 cat("\n🎉 ANALYTICS DEMO COMPLETED SUCCESSFULLY!\n")
 cat("=========================================\n")
-cat("📊 Alle Module erfolgreich getestet\n")
+cat("📊 Alle verfügbaren Module erfolgreich getestet\n")
 cat("📁 Ergebnisse gespeichert in: reports/analytics/\n")
 cat("🔧 Modular strukturierte Funktionen einsatzbereit\n")
 
@@ -314,7 +420,7 @@ cat("1. Altersklassen:\n")
 cat("   result <- age_classification$classify_age_groups(customers_data)\n")
 cat("   summary <- age_classification$create_age_summary(result)\n\n")
 
-cat("2. Zeitreihen-Analyse:\n")
+cat("2. Zeitreihen-Analyse (mit ausreichend historischen Daten):\n")
 cat("   growth <- timeseries_analysis$calculate_monthly_growth(timeseries_data)\n")
 cat("   volatility <- timeseries_analysis$calculate_volatility(growth)\n")
 cat("   sensitivity <- timeseries_analysis$calculate_interest_sensitivity(timeseries_data)\n\n")
@@ -322,4 +428,7 @@ cat("   sensitivity <- timeseries_analysis$calculate_interest_sensitivity(timese
 cat("3. Mandanten-Summaries:\n")
 cat("   summaries <- mandant_analysis$create_mandant_summaries(contracts, customers, timeseries)\n\n")
 
-cat("💡 Tipp: Alle Funktionen sind vollständig dokumentiert mit {roxygen2}!\n")
+cat("💡 Hinweis:\n")
+cat("   - Zeitreihen-Analysen benötigen ausreichend historische Daten\n")
+cat("   - Mindestens 6-12 Beobachtungen pro Vertrag für robuste Ergebnisse\n")
+cat("   - Alle Funktionen sind vollständig dokumentiert mit {roxygen2}!\n")
