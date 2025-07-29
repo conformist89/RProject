@@ -165,73 +165,73 @@ perform_business_logic_checks <- function(data, table_name) {
   
   business_issues <- 0
 
-# Contract ID format check  
-if ("contractid" %in% names(data)) {
-  cat("CONTRACT ID FORMAT:\n")
-  
-  # Remove NA values first, then check format
-  valid_contractids <- data$contractid[!is.na(data$contractid) & data$contractid != ""]
-  
-  if (length(valid_contractids) > 0) {
-    # Check V### pattern on non-NA values
-    valid_format <- grepl("^V[0-9]+$", valid_contractids)
-    invalid_count <- sum(!valid_format)
+  # Contract ID format check  
+  if ("contractid" %in% names(data)) {
+    cat("CONTRACT ID FORMAT:\n")
     
-    if (invalid_count > 0) {
-      cat("  ❌ INVALID FORMAT: Found", invalid_count, "IDs not matching V### pattern\n")
-      invalid_examples <- valid_contractids[!valid_format]
-      cat("    Examples:", paste(head(invalid_examples, 5), collapse = ", "), "\n")
-      business_issues <- business_issues + invalid_count
-      
-      # Show what the invalid formats look like
-      cat("    Common issues found:\n")
-      if (any(grepl("\\^", invalid_examples))) {
-        cat("      - Contains ^ characters\n")
-      }
-      if (any(grepl("\\(", invalid_examples))) {
-        cat("      - Contains ( characters\n")
-      }
-      if (any(grepl(" ", invalid_examples))) {
-        cat("      - Contains spaces\n")
-      }
-      
-    } else {
-      cat("  ✅ VALID FORMAT: All non-missing contract IDs follow V### pattern\n")
-    }
+    # Remove NA values first, then check format
+    valid_contractids <- data$contractid[!is.na(data$contractid) & data$contractid != ""]
     
-    # Only try to extract numeric parts from VALID formatted IDs
-    valid_ids_only <- valid_contractids[valid_format]
-    if (length(valid_ids_only) > 0) {
-      # Extract numeric parts safely
-      tryCatch({
-        numeric_parts <- gsub("V", "", valid_ids_only)
-        # Convert to numeric, handle any conversion errors
-        numeric_values <- suppressWarnings(as.numeric(numeric_parts))
-        # Remove any NAs that resulted from conversion
-        numeric_values <- numeric_values[!is.na(numeric_values)]
+    if (length(valid_contractids) > 0) {
+      # Check V### pattern on non-NA values
+      valid_format <- grepl("^V[0-9]+$", valid_contractids)
+      invalid_count <- sum(!valid_format)
+      
+      if (invalid_count > 0) {
+        cat("  ❌ INVALID FORMAT: Found", invalid_count, "IDs not matching V### pattern\n")
+        invalid_examples <- valid_contractids[!valid_format]
+        cat("    Examples:", paste(head(invalid_examples, 5), collapse = ", "), "\n")
+        business_issues <- business_issues + invalid_count
         
-        if (length(numeric_values) > 0) {
-          cat("  📊 VALID ID RANGE: V", sprintf("%03.0f", min(numeric_values)), 
-              " to V", sprintf("%03.0f", max(numeric_values)), "\n")
-          cat("  📊 Valid formatted IDs:", length(valid_ids_only), "out of", length(valid_contractids), "\n")
+        # Show what the invalid formats look like
+        cat("    Common issues found:\n")
+        if (any(grepl("\\^", invalid_examples))) {
+          cat("      - Contains ^ characters\n")
         }
-      }, error = function(e) {
-        cat("  ⚠️ Could not analyze ID range due to format issues\n")
-      })
+        if (any(grepl("\\(", invalid_examples))) {
+          cat("      - Contains ( characters\n")
+        }
+        if (any(grepl(" ", invalid_examples))) {
+          cat("      - Contains spaces\n")
+        }
+        
+      } else {
+        cat("  ✅ VALID FORMAT: All non-missing contract IDs follow V### pattern\n")
+      }
+      
+      # Only try to extract numeric parts from VALID formatted IDs
+      valid_ids_only <- valid_contractids[valid_format]
+      if (length(valid_ids_only) > 0) {
+        # Extract numeric parts safely
+        tryCatch({
+          numeric_parts <- gsub("V", "", valid_ids_only)
+          # Convert to numeric, handle any conversion errors
+          numeric_values <- suppressWarnings(as.numeric(numeric_parts))
+          # Remove any NAs that resulted from conversion
+          numeric_values <- numeric_values[!is.na(numeric_values)]
+          
+          if (length(numeric_values) > 0) {
+            cat("  📊 VALID ID RANGE: V", sprintf("%03.0f", min(numeric_values)), 
+                " to V", sprintf("%03.0f", max(numeric_values)), "\n")
+            cat("  📊 Valid formatted IDs:", length(valid_ids_only), "out of", length(valid_contractids), "\n")
+          }
+        }, error = function(e) {
+          cat("  ⚠️ Could not analyze ID range due to format issues\n")
+        })
+      } else {
+        cat("  ❌ NO PROPERLY FORMATTED IDs: No contract IDs follow the V### pattern\n")
+      }
+      
     } else {
-      cat("  ❌ NO PROPERLY FORMATTED IDs: No contract IDs follow the V### pattern\n")
+      cat("  ❌ NO VALID IDs: All contract IDs are missing or empty\n")
+      business_issues <- business_issues + 1
     }
     
-  } else {
-    cat("  ❌ NO VALID IDs: All contract IDs are missing or empty\n")
-    business_issues <- business_issues + 1
-  }
-  
-  # Report missing IDs
-  missing_ids <- sum(is.na(data$contractid) | data$contractid == "")
-  if (missing_ids > 0) {
-    cat("  ⚠️ MISSING IDs:", missing_ids, "contract IDs are missing or empty\n")
-  }
+    # Report missing IDs
+    missing_ids <- sum(is.na(data$contractid) | data$contractid == "")
+    if (missing_ids > 0) {
+      cat("  ⚠️ MISSING IDs:", missing_ids, "contract IDs are missing or empty\n")
+    }
 
     # Show summary of all contract ID issues
     total_contracts <- nrow(data)
@@ -249,24 +249,30 @@ if ("contractid" %in% names(data)) {
     cat("    - Invalid format:", invalid_count, "\n")
     cat("    - Missing/empty:", missing_ids, "\n")
     cat("    - Duplicates found:", duplicates_count, "\n")
+  }
   
-#   # Customer ID format check
+  # Customer ID format check
   if ("customerid" %in% names(data)) {
     cat("CUSTOMER ID FORMAT:\n")
     
-    # valid_format <- grepl("^K[0-9]+$", data$customerid, na.rm = TRUE)
-    valid_format <- grepl("^K[0-9]+$", valid_customerids)
-    invalid_count <- sum(!valid_format, na.rm = TRUE)
+    # Remove NA values first, then check format
+    valid_customerids <- data$customerid[!is.na(data$customerid) & data$customerid != ""]
     
-    if (invalid_count > 0) {
-      cat("  ❌ INVALID FORMAT: Found", invalid_count, "IDs not matching K### pattern\n")
-      business_issues <- business_issues + invalid_count
+    if (length(valid_customerids) > 0) {
+      valid_format <- grepl("^K[0-9]+$", valid_customerids)
+      invalid_count <- sum(!valid_format)
+      
+      if (invalid_count > 0) {
+        cat("  ❌ INVALID FORMAT: Found", invalid_count, "IDs not matching K### pattern\n")
+        business_issues <- business_issues + invalid_count
+      } else {
+        cat("  ✅ VALID FORMAT: All customer IDs follow K### pattern\n")
+      }
     } else {
-      cat("  ✅ VALID FORMAT: All customer IDs follow K### pattern\n")
+      cat("  ❌ NO VALID CUSTOMER IDs: All customer IDs are missing or empty\n")
     }
   }
 
-  
   # Birthdate validation
   if ("birthdate" %in% names(data)) {
     cat("BIRTHDATE VALIDATION:\n")
