@@ -92,7 +92,13 @@ Dieses Projekt beinhaltet eine automatisierte Datenverarbeitung und -bereinigung
 - `R/` - Helper-Funktionen
 - `reports/` - Generierte Berichte
 - `pipeline.qmd` - Hauptdokumentation
-- `main.R` - Einfache Ausführung
+- `simple_data_quality.R` - interne Daten laden und Datenqualität prüfen
+- `remote_data_quality.R` - externe Zinssätze laden und Datenqualität prüfen
+- `cleaned_data.R` - Rohdatenbasis Aufgabe und speichert die bereinigte Rohdatenbasis versioniert in DuckDB
+- `duckdb_test.r` - Validierung der Ergebnisse aus der DuckDB-Ausgabedatei
+- `check_data.R` - ein einfacher Datencheck ohne Details
+- `vergleich.R` - Analyse & Business‑Logik Skript
+- `analyse.r` - Das Skript `vergleich.R` ausführen
 
 ## Daten vorbereiten
 
@@ -105,4 +111,14 @@ Legen Sie folgende Dateien in `data/raw/`:
 
 Dieses Projekt verwendet `renv` für reproduzierbare Umgebungen.
 Bei Problemen: `renv::restore()`
+
+
+## Verwendete ChatGPT-Prompts
+
+1. "Wie lese ich Daten aus SQLite, Excel und JSON in R ein?"
+2. "Wie kann ich historische Zinssätze in R mit quantmod/yahoofinancer abrufen?"
+3. "Wie prüfe ich Datenqualität mit pointblank?"
+4. "Wie schreibe ich eine Funktion clean_data() in R zur Datenbereinigung?"
+5. "Wie speichere ich DataFrames in DuckDB mit Zeitstempel?"
+6. "Wie kann ich Altersklassen basierend auf Geburtsdatum berechnen?"
 
