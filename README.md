@@ -91,7 +91,7 @@ Dieses Projekt beinhaltet eine automatisierte Datenverarbeitung und -bereinigung
 - `data/processed/` - Verarbeitete Daten
 - `R/` - Helper-Funktionen
 - `reports/` - Generierte Berichte
-- `pipeline.qmd` - Hauptdokumentation
+- `README.md` - Hauptdokumentation
 - `simple_data_quality.R` - interne Daten laden und Datenqualität prüfen
 - `remote_data_quality.R` - externe Zinssätze laden und Datenqualität prüfen
 - `cleaned_data.R` - Rohdatenbasis Aufgabe und speichert die bereinigte Rohdatenbasis versioniert in DuckDB
